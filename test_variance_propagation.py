@@ -1,6 +1,22 @@
 import pdb
+import ast
+from tqdm import tqdm
+import random
 import numpy as np
+import cotengra as ctg
 from scipy.sparse import dok_matrix
+from qiskit import QuantumCircuit, transpile
+from qiskit.circuit import Parameter
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from qiskit.converters import circuit_to_dag, dag_to_circuit
+
+from qiskit_nature.second_q.drivers import PySCFDriver
+from qiskit_nature.second_q.mappers import JordanWignerMapper
+from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
+from qiskit.quantum_info import Operator, Pauli, SparsePauliOp
+from qiskit.circuit.library import TwoLocal
+from qiskit_aer.quantum_info import AerStatevector
+from pgmQC.model.tensorRV_network_builder import TensorRVNetworkBuilder
 
 """
     Rz(θ)•I•Rz^dag(θ) = I
@@ -88,6 +104,17 @@ def get_CNOT():
                      [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])
     cov = np.zeros((16, 16, 16, 16))
     return mean, cov
+
+from pgmQC.utils.setting import I, X, Y, Z
+def get_1q_gate(gate: np.ndarray):
+    tensor = []
+    for input_state in [I, X, Y, Z]:
+        rho = gate * input_state * gate.conj().T
+        row_tensor = []
+        for output_state in [I, X, Y, Z]:
+            row_tensor.append(np.trace(rho @ output_state).real / 2)
+        tensor.append(row_tensor)
+    return np.array(tensor), np.zeros((4, 4, 4, 4))
 
 class RV_Matrix:
     def __init__(self, mean, cov):
@@ -209,6 +236,44 @@ class RV_Matrix_Sparse:
         """
         return self.cov.toarray()
 
+def contract_tensors(tensorRV_list, uncontracted_vars):
+    """
+    Calculate the path of contracting a list of tensors, and then contract them.
+    
+    Args:
+        tensor_list: List of tensors to contract.
+        uncontracted_vars: List of uncontracted variables.
+    
+    Returns:
+        A tensor representing the result of the contraction.
+    """
+    size_dict = {}
+    inputs = []
+    for tensorRV in tensorRV_list:
+        inputs.append(tuple(tensorRV.variables))
+        for var in tensorRV.variables:
+            size_dict[var] = 4
+    output = tuple(uncontracted_vars)
+    opt = ctg.HyperOptimizer()
+    tree = opt.search(inputs, output, size_dict)
+    print(tree)
+    print(tree.contraction_width(), tree.contraction_cost())
+    path = tree.get_path()
+    assert len(path) == len(tensorRV_list) - 1, "The number of contractions should be equal to the number of tensors minus 1."
+    
+    for i, j in path:
+        new_tensorRV = tensorRV_list[i] @ tensorRV_list[j]
+        if i > j:
+            del tensorRV_list[i]
+            del tensorRV_list[j]
+        else:
+            del tensorRV_list[j]
+            del tensorRV_list[i]
+        tensorRV_list.append(new_tensorRV)
+    
+    assert len(tensorRV_list) == 1, "The number of tensors should be 1 after contraction."
+    return tensorRV_list[0]
+
 def main():
     RZ = RV_Matrix(*get_RZ())
     RX = RV_Matrix(*get_RX())
@@ -230,11 +295,102 @@ def main():
     initial_state = initial_state @ RX @ RZ @ RY @ RX @ RZ @ RY
     initial_state_sparse = initial_state_sparse @ RX_sparse @ RZ_sparse @ RY_sparse @ RX_sparse @ RZ_sparse @ RY_sparse
 
+    # for _ in ['I', 'X', 'Y', 'Z']:
+    circuit = QuantumCircuit(1)
+    angle = Parameter("angle_0")
+    circuit.rx(angle, 0)
+    angle = Parameter("angle_1")
+    circuit.rz(angle, 0)
+    angle = Parameter("angle_2")
+    circuit.ry(angle, 0)
+    angle = Parameter("angle_3")
+    circuit.rx(angle, 0)
+    angle = Parameter("angle_4")
+    circuit.rz(angle, 0)
+    angle = Parameter("angle_5")
+    circuit.ry(angle, 0)
+    dag = circuit_to_dag(circuit)
+    dag.draw(filename='dag.png')
+    builder = TensorRVNetworkBuilder(dag)
+    markov_net, uncontracted_nodes, tensorRV_list = builder.build()
+    
+    result = contract_tensors(tensorRV_list, uncontracted_nodes)
+    for key, value in result.cov:
+        print(key, value * 4)
+    
+    
     print(initial_state.mean * 2)
     print(initial_state.cov * 4)
     
     print(initial_state_sparse.to_dense_mean() * 2)
     print(initial_state_sparse.to_dense_cov() * 4)
+    exit()
+    problem = PySCFDriver(atom="H .0 .0 .0; H .0 .0 1.", basis='sto3g').run()
+    mapper = JordanWignerMapper()
+    # ansatz = UCCSD(
+    #     problem.num_spatial_orbitals,
+    #     problem.num_particles,
+    #     mapper,
+    #     initial_state=HartreeFock(
+    #         problem.num_spatial_orbitals,
+    #         problem.num_particles,
+    #         mapper,
+    #     ),
+    # )
+    ansatz = TwoLocal(4, 'ry', 'rzz', 'linear', reps=5, insert_barriers=True)
+
+    second_q_op = problem.hamiltonian.second_q_op()
+    qubit_op = mapper.map(second_q_op)
+    print(qubit_op)
+    circ = transpile(ansatz, basis_gates=['u3', 'cx', 'rz'])
+    print(circ)
     
+    obs = ['']
+    for _ in range(ansatz.num_qubits):
+        new_obs = []
+        for s in obs:
+            for p in ['I', 'X', 'Y', 'Z']:
+                new_obs.append(s + p)
+        obs = new_obs
+    
+    results = []
+    num_trials = 1000
+    for _ in tqdm(range(num_trials)):
+        params = [random.uniform(-np.pi, np.pi) for _ in range(ansatz.num_parameters)]
+        circuit = ansatz.assign_parameters(params)
+        
+        result = []
+        for ob in obs:
+            expectation = AerStatevector(circuit, device='GPU').expectation_value(Pauli(ob))
+            result.append(expectation)
+        results.append(result)
+    
+    results = np.array(results)
+    mean = np.mean(results, axis=0)
+    vars = np.mean((results - mean) ** 2, axis=0)
+
+    mean_dic = {}
+    vars_dic = {}
+    for i, ob in enumerate(obs):
+        mean_dic[ob] = mean[i]
+        vars_dic[ob] = vars[i]
+    
+    paulis = ast.literal_eval(qubit_op.paulis.__str__())
+    average_of_vars = 0
+    for pauli in paulis:
+        print(f"{pauli}, mean: {mean_dic[pauli]}, vars: {vars_dic[pauli]}")
+        average_of_vars += vars_dic[pauli]
+    average_of_vars /= len(paulis)
+    
+    print("===============Not in Paulis===============")
+    average_of_vars_not_in_paulis = 0
+    for ob in obs:
+        if ob not in paulis:
+            print(f"{ob}, mean: {mean_dic[ob]}, vars: {vars_dic[ob]}")
+            average_of_vars_not_in_paulis += vars_dic[ob]
+    average_of_vars_not_in_paulis /= len(obs) - len(paulis)
+    
+    print("Average of vars in Paulis:", average_of_vars)
+    print("Average of vars not in Paulis:", average_of_vars_not_in_paulis)
 if __name__ == "__main__":
     main()
