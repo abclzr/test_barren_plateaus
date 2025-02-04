@@ -287,7 +287,6 @@ def main():
     H_sparse = RV_Matrix_Sparse(*get_Hadamard())
     initial_state_sparse = RV_Matrix_Sparse(*get_initial_state())
     
-
     # initial_state = initial_state @ H @ RZ
     # initial_state_sparse = initial_state_sparse @ H_sparse @ RZ_sparse
     # initial_state = initial_state @ RX @ RZ
@@ -296,28 +295,31 @@ def main():
     initial_state_sparse = initial_state_sparse @ RX_sparse @ RZ_sparse @ RY_sparse @ RX_sparse @ RZ_sparse @ RY_sparse
 
     # for _ in ['I', 'X', 'Y', 'Z']:
-    circuit = QuantumCircuit(1)
-    angle = Parameter("angle_0")
-    circuit.rx(angle, 0)
-    angle = Parameter("angle_1")
-    circuit.rz(angle, 0)
-    angle = Parameter("angle_2")
-    circuit.ry(angle, 0)
-    angle = Parameter("angle_3")
-    circuit.rx(angle, 0)
-    angle = Parameter("angle_4")
-    circuit.rz(angle, 0)
-    angle = Parameter("angle_5")
-    circuit.ry(angle, 0)
+    circuit = QuantumCircuit(2)
+    circuit.ry(Parameter('θ0'), 0)
+    circuit.ry(Parameter('θ1'), 1)
+    # circuit.ry(Parameter('θ2'), 2)
+    circuit.cx(0, 1)
+    circuit.rz(Parameter('θ3'), 1)
+    circuit.cx(0, 1)
+    # circuit.cx(1, 2)
+    # circuit.rz(Parameter('θ4'), 2)
+    # circuit.cx(1, 2)
     dag = circuit_to_dag(circuit)
     dag.draw(filename='dag.png')
     builder = TensorRVNetworkBuilder(dag)
-    markov_net, uncontracted_nodes, tensorRV_list = builder.build()
+    true_false_network, uncontracted_nodes, tensorRV_list = builder.build()
+    result = builder.contract_tensors()
+    print(result.paulistrings_and_variances())
+    total_var = 0
+    for ps, var in result.paulistrings_and_variances():
+        total_var += var
+    print(f'Variance sumed up: {total_var}')
+    result2 = builder.find_models()
+    print(result2.paulistrings())
+    pdb.set_trace()
     
-    result = contract_tensors(tensorRV_list, uncontracted_nodes)
-    for key, value in result.cov:
-        print(key, value * 4)
-    
+    exit()
     
     print(initial_state.mean * 2)
     print(initial_state.cov * 4)
