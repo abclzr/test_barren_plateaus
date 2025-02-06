@@ -295,22 +295,20 @@ def main():
     initial_state_sparse = initial_state_sparse @ RX_sparse @ RZ_sparse @ RY_sparse @ RX_sparse @ RZ_sparse @ RY_sparse
 
     # for _ in ['I', 'X', 'Y', 'Z']:
-    circuit = QuantumCircuit(2)
-    circuit.ry(Parameter('θ0'), 0)
-    circuit.ry(Parameter('θ1'), 1)
-    # circuit.ry(Parameter('θ2'), 2)
-    circuit.cx(0, 1)
-    circuit.rz(Parameter('θ3'), 1)
-    circuit.cx(0, 1)
-    # circuit.cx(1, 2)
-    # circuit.rz(Parameter('θ4'), 2)
-    # circuit.cx(1, 2)
+    circuit = QuantumCircuit(1)
+    circuit.rx(Parameter('θ0'), 0)
+    circuit.rz(Parameter('θ1'), 0)
+    circuit.ry(Parameter('θ2'), 0)
+    circuit.rx(Parameter('θ3'), 0)
+    circuit.rz(Parameter('θ4'), 0)
+    circuit.ry(Parameter('θ5'), 0)
     dag = circuit_to_dag(circuit)
     dag.draw(filename='dag.png')
     builder = TensorRVNetworkBuilder(dag)
     true_false_network, uncontracted_nodes, tensorRV_list = builder.build()
-    result = builder.contract_tensors()
-    print(result.paulistrings_and_variances())
+    result = builder.contract_tensors(obs=['I', 'X', 'Y', 'Z'])
+    print(result)
+    pdb.set_trace()
     total_var = 0
     for ps, var in result.paulistrings_and_variances():
         total_var += var
