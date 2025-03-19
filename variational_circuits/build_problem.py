@@ -16,7 +16,7 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 
 from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.mappers import JordanWignerMapper
+from qiskit_nature.second_q.mappers import JordanWignerMapper, BravyiKitaevMapper, ParityMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit.quantum_info import Operator, Pauli, SparsePauliOp
 from qiskit.circuit.library import TwoLocal
@@ -59,7 +59,8 @@ def build_problem(problem_name):
 
     # service = QiskitRuntimeService(channel="ibm_quantum")
     # backend = service.least_busy(operational=True, simulator=False)
-    mapper = JordanWignerMapper()
+    # mapper = JordanWignerMapper()
+    mapper = ParityMapper()
     # Define the Hamiltonian
     second_q_op = problem.hamiltonian.second_q_op()
     qubit_op = mapper.map(second_q_op)
