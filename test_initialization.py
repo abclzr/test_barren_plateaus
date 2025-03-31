@@ -3,12 +3,41 @@ import numpy as np
 
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper, BravyiKitaevMapper, ParityMapper
+from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
+
 from autovar.initialization import initialize
 from autovar.build import build_circuit_from_clifford
 from autovar.evaluation import get_expectation_value, calc_ground_state_energy
 from clapton.clapton import claptonize
 from clapton.ansatzes import circular_ansatz
+from clapton.clifford import ParametrizedCliffordCircuit
+
 from scipy.optimize import minimize
+
+def get_circular_ansatz(N, reps=1, fix_2q=False, initial_state=None):
+    pcirc = ParametrizedCliffordCircuit()
+    if initial_state is not None:
+        for i, bit in enumerate(initial_state):
+            if bit:
+                pcirc.RX(i).fix(2)
+
+    for _ in range(reps):
+        for i in range(N):
+            pcirc.RY(i)
+        for i in range(N):
+            pcirc.RZ(i)
+        for i in range(N):
+            control = (i-1) % N
+            target = i
+            if fix_2q:
+                pcirc.Q2(control, target).fix(1)
+            else:
+                pcirc.Q2(control, target)
+    for i in range(N):
+        pcirc.RY(i)
+    for i in range(N):
+        pcirc.RZ(i)
+    return pcirc
 
 driver_dict = {
     'H2': PySCFDriver(atom="H .0 .0 .0; H .0 .0 0.735", basis='sto3g'),
@@ -39,7 +68,12 @@ for pauli, coeff in qubit_op_before_reduction.label_iter():
 
 n_qubits = len(paulis[0])
 
-vqe_pcirc = circular_ansatz(N=len(paulis[0]), reps=2, fix_2q=True)
+hf=HartreeFock(
+    problem.num_spatial_orbitals,
+    problem.num_particles,
+    mapper,
+)
+vqe_pcirc = get_circular_ansatz(N=len(paulis[0]), reps=2, fix_2q=True, initial_state=hf._bitstr)
 for gate in vqe_pcirc.gates:
     print(gate.label, gate.is_fixed())
 
@@ -73,5 +107,5 @@ result = minimize(objective_function, initial_point, method='COBYLA', options={'
 ground_state_energy = result.fun
 
 print("lowest energy:", ground_state_energy)
-print("Hartree-Fock energy:", problem.reference_energy)
-print("Ground state energy:", calc_ground_state_energy(problem, mapper))
+print("Hartree-Fock energy:", problem.reference_energy - problem.nuclear_repulsion_energy)
+print("Ground state energy:", calc_ground_state_energy(problem, mapper) - problem.nuclear_repulsion_energy)
