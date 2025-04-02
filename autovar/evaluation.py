@@ -13,7 +13,7 @@ def get_expectation_value(circuit: QuantumCircuit, param_list: list[Parameter], 
     statevec = Statevector.from_instruction(circuit)
     total_energy = 0
     for pauli, coeff in zip(paulis, coeffs):
-        p = Pauli(pauli[::-1])
+        p = Pauli(pauli)
         expectation = statevec.expectation_value(p).real
         total_energy += expectation * coeff
     return total_energy
@@ -29,6 +29,7 @@ def calc_ground_state_energy(problem, mapper):
             mapper,
         ),
     )
+    
     second_q_op = problem.hamiltonian.second_q_op()
     qubit_op_before_reduction = mapper.map(second_q_op)
     optimizer = COBYLA()#SLSQP(maxiter=10)
