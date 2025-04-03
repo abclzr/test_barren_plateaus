@@ -55,7 +55,7 @@ mapper_dict = {
     'parity': ParityMapper()
 }
 
-driver = driver_dict['H2']
+driver = driver_dict['LiH']
 problem = driver.run()
 mapper = mapper_dict['jordan_wigner']
 second_q_op = problem.hamiltonian.second_q_op()
