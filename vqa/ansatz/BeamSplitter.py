@@ -1,7 +1,7 @@
 import pdb
 import numpy as np
 from tqdm import tqdm
-from qiskit import QuantumCircuit, ClassicalRegister
+from qiskit import QuantumCircuit
 from qiskit.quantum_info import Pauli, Statevector, SparsePauliOp
 from qiskit.circuit import Parameter
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
@@ -14,35 +14,96 @@ from qiskit_aer.noise import (NoiseModel, QuantumError, ReadoutError,
     pauli_error, depolarizing_error, thermal_relaxation_error)
 
 
-class TrainableUCCSD:
+def apply_BS_gate(circuit: QuantumCircuit, control: int, target: int, theta: Parameter):
     """
-    A class to create a trainable UCCSD ansatz circuit for VQE.
+    Apply a BS gate to the circuit.
     """
-    def __init__(self, num_spatial_orbitals, num_particles, mapper):
+    circuit.rz(-3/4*np.pi, target)
+    circuit.cx(target, control)
+    circuit.rz((theta+np.pi)/2, control)
+    circuit.ry((theta-np.pi)/2, target)
+    circuit.cx(control, target)
+    circuit.ry((np.pi-theta)/2, target)
+    circuit.cx(target, control)
+    circuit.rz(np.pi/2, control)
+    circuit.rz(np.pi/4, target)
+
+def build_HWPA_BS(N, reps=1, initial_state=None) -> tuple[QuantumCircuit, list[Parameter], list[float]]:
+    qiskit_circuit = QuantumCircuit(N)
+    if initial_state is not None:
+        for i, bit in enumerate(initial_state):
+            if bit:
+                qiskit_circuit.x(i)
+    param_cnt = 0
+    param_list = []
+    initial_point = []
+    assert N % 2 == 0, "N must be even"
+    reverse_flag = False
+    for _ in range(reps):
+        reverse_flag = not reverse_flag
+        for i in range(0, N-1, 2):
+            param_list.append(Parameter('theta_' + str(param_cnt)))
+            param_cnt += 1
+            initial_point.append(0)
+            if reverse_flag:
+                apply_BS_gate(qiskit_circuit, i, i+1, param_list[-1])
+            else:
+                apply_BS_gate(qiskit_circuit, i+1, i, param_list[-1])
+        if (N-1) % 2 == 0:
+            param_list.append(Parameter('theta_' + str(param_cnt)))
+            param_cnt += 1
+            initial_point.append(0)
+            if reverse_flag:
+                apply_BS_gate(qiskit_circuit, N-1, 0, param_list[-1])
+            else:
+                apply_BS_gate(qiskit_circuit, 0, N-1, param_list[-1])
+        for i in range(1, N-1, 2):
+            param_list.append(Parameter('theta_' + str(param_cnt)))
+            param_cnt += 1
+            initial_point.append(0)
+            if reverse_flag:
+                apply_BS_gate(qiskit_circuit, i, i+1, param_list[-1])
+            else:
+                apply_BS_gate(qiskit_circuit, i+1, i, param_list[-1])
+        if (N-1) % 2 == 1:
+            param_list.append(Parameter('theta_' + str(param_cnt)))
+            param_cnt += 1
+            initial_point.append(0)
+            if reverse_flag:
+                apply_BS_gate(qiskit_circuit, N-1, 0, param_list[-1])
+            else:
+                apply_BS_gate(qiskit_circuit, 0, N-1, param_list[-1])
+    return qiskit_circuit, param_list, initial_point
+
+class Trainable_HWPA_BeamSplitter:
+    """
+    A class to create a trainable HWPA circuit for VQE.
+    """
+    def __init__(self, num_spatial_orbitals, num_particles, mapper, reps):
         self.num_spatial_orbitals = num_spatial_orbitals
         self.num_particles = num_particles
         self.mapper = mapper
-
-        # Define the ansatz circuit
-        ansatz = UCCSD(
+        
+        hf=HartreeFock(
             num_spatial_orbitals,
             num_particles,
             mapper,
-            initial_state=HartreeFock(
-                num_spatial_orbitals,
-                num_particles,
-                mapper,
-            ),
         )
-        self.num_qubits = ansatz.num_qubits
-        self.num_clbits = ansatz.num_qubits
-        self.num_parameters = ansatz.num_parameters
-        self.original_parameters = list(ansatz.parameters)
-        transpiled_ansatz = transpile(ansatz, optimization_level=3, basis_gates=['rz', 'x', 'u3', 'cx'])
-        # transpiled_ansatz.draw('mpl', filename=f'UCCSD_{self.num_qubits}.png')
-        self.trainable_ansatz, self.trainable_parameters, self.trainable_to_original_params_map = \
-            self.reorganize(transpiled_ansatz)
-    
+        self.reps = reps
+        self.initial_state = hf._bitstr
+        qiskit_circuit, param_list, initial_point = build_HWPA_BS(N=len(hf._bitstr), reps=reps, initial_state=hf._bitstr)
+
+        self.num_qubits = qiskit_circuit.num_qubits
+        self.num_clbits = qiskit_circuit.num_qubits
+        self.num_parameters = len(param_list)
+        self.original_parameters = param_list
+        transpiled_ansatz = transpile(qiskit_circuit, optimization_level=3, basis_gates=['rz', 'ry', 'x', 'u3', 'cz', 'cx'])
+        try:
+            transpiled_ansatz.draw('mpl', filename=f'HWPA_{self.num_qubits}_{reps}.png')
+        except Exception as e:
+            print(f"Error drawing circuit: {e}")
+        self.trainable_ansatz = transpiled_ansatz
+            
     def parameters(self):
         return self.original_parameters
     
@@ -65,6 +126,7 @@ class TrainableUCCSD:
                 new_ansatz.append(ins, ins.qubits)
         return new_ansatz, new_parameters, new_to_old_parameters
 
+    
     def set_objective_function(self, paulis: list[str], coeffs: list[float]):
         """
         Set the objective function for the ansatz.
@@ -75,7 +137,6 @@ class TrainableUCCSD:
     def _evaluate_by_trainable_ansatz(self, param_dict: dict[Parameter, float])-> float:
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
         statevec = Statevector.from_instruction(parameterized_ansatz)
-        print("Statevector:", statevec)
         total_energy = 0
         for pauli, coeff in zip(self.paulis, self.coeffs):
             p = Pauli(pauli)
@@ -142,39 +203,15 @@ class TrainableUCCSD:
             print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval}")
         return ret
 
+    
     def evaluate_objective_function(self, param_dict: dict[Parameter, float])-> float:
         """
         Evaluate the objective function for the ansatz.
         """
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
-        return self._evaluate_by_trainable_ansatz(trainable_param_values)
+        return self._evaluate_by_trainable_ansatz(param_dict)
 
     def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
         """
         Evaluate the objective function for the ansatz.
         """
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
-        return self._evaluate_by_trainable_ansatz_with_noise(trainable_param_values, noise_rate)
-
-    def calculate_gradient(self, param_dict: dict[Parameter, float])->dict[Parameter, float]:
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
-        
-        grad_old_params = {old_param: 0. for old_param in param_dict.keys()}
-        for new_param, old_param in tqdm(self.trainable_to_original_params_map.items()):
-            trainable_param_values[new_param] += np.pi/2
-            f1 = self._evaluate_by_trainable_ansatz(trainable_param_values)
-            trainable_param_values[new_param] -= np.pi
-            f2 = self._evaluate_by_trainable_ansatz(trainable_param_values)
-            trainable_param_values[new_param] += np.pi/2
-            grad = (f1 - f2)/2
-            grad_old_params[old_param] += grad
-        return grad_old_params
+        return self._evaluate_by_trainable_ansatz_with_noise(param_dict, noise_rate)
