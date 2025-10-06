@@ -23,11 +23,12 @@ from vqa.ansatz.BeamSplitter import Trainable_HWPA_BeamSplitter
 mole_name = 'LiH'
 mapper_name = 'jordan_wigner'
 ansatz_name = 'HWPA'
+method = 'BFGS'
 reps = 83
 
 driver_dict = {
     'H2': PySCFDriver(atom="H .0 .0 .0; H .0 .0 0.735", basis='sto3g'),
-    'LiH': PySCFDriver(atom="Li .0 .0 .0; H .0 .0 1.6", basis='sto3g'),
+    'LiH': PySCFDriver(atom="Li .0 .0 .0; H .0 .0 1.5699", basis='sto3g'),
     'BeH2': PySCFDriver(atom="Be .0 .0 .0; H .0 .0 -1.3; H .0 .0 1.3", basis='sto3g'),
     'CH4': PySCFDriver(atom="C .0 .0 .0; H .0 .0 1.0; H .0 .0 -1.0; H .0 1.0 .0; H .0 -1.0 .0", basis='sto3g'),
     'MgH2': PySCFDriver(atom="Mg .0 .0 .0; H .0 .0 -1.3; H .0 .0 1.3", basis='sto3g'),
@@ -67,7 +68,7 @@ def gradient_function(param_values):
     return ansatz.calculate_gradient(param_values)
 
 # Initialize parameters
-map_param_values = {param: np.random.rand() for param in ansatz.parameters()}
+map_param_values = {param: 0.0 for param in ansatz.parameters()}
 
 # Convert parameters to a numpy array for optimization
 initial_params = np.array(list(map_param_values.values()))
@@ -93,7 +94,7 @@ start_cobyla = time.time()
 result_cobyla = minimize(
     fun=scipy_objective,
     x0=initial_params,
-    method='COBYLA',
+    method=method,
     options={'disp': True},
 )
 end_cobyla = time.time()

@@ -22,7 +22,7 @@ from vqa.ansatz.BeamSplitter import Trainable_HWPA_BeamSplitter
 
 mole_name = 'H2'
 mapper_name = 'jordan_wigner'
-ansatz_name = 'HWPA'
+ansatz_name = 'UCCSD'
 reps = 3
 os.makedirs("training_data", exist_ok=True)
 if ansatz_name == 'HWPA':
@@ -92,7 +92,7 @@ print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 optimized_params_cobyla = dict(zip(ansatz.parameters(), result_cobyla.x))
 print("COBYLA Optimized Parameters:", optimized_params_cobyla)
 results = []
-for noise_rate in [0, 0.00001, 0.0001, 0.001, 0.01]:
+for noise_rate in [0]:#, 0.00001, 0.0001, 0.001, 0.01]:
     value = objective_function(optimized_params_cobyla, noise_rate)
     print("COBYLA Optimized Objective Function Value:", value, f"with noise rate {noise_rate}")
     results.append((noise_rate, value))

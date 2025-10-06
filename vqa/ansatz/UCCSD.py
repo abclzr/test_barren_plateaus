@@ -71,7 +71,7 @@ class TrainableUCCSD:
         """
         self.paulis = paulis
         self.coeffs = coeffs
-        
+
     def _evaluate_by_trainable_ansatz(self, param_dict: dict[Parameter, float])-> float:
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
         statevec = Statevector.from_instruction(parameterized_ansatz)
