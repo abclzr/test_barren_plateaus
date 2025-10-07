@@ -13,6 +13,8 @@ from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_aer.noise import (NoiseModel, QuantumError, ReadoutError,
     pauli_error, depolarizing_error, thermal_relaxation_error)
 
+from vqa.utils.IcebergCode import add_icebergcode_measurement, convert_to_icebergcode_circuit, convert_measurement_basis
+
 
 class TrainableUCCSD:
     """
@@ -39,9 +41,11 @@ class TrainableUCCSD:
         self.num_parameters = ansatz.num_parameters
         self.original_parameters = list(ansatz.parameters)
         transpiled_ansatz = transpile(ansatz, optimization_level=3, basis_gates=['rz', 'x', 'u3', 'cx'])
-        # transpiled_ansatz.draw('mpl', filename=f'UCCSD_{self.num_qubits}.png')
-        self.trainable_ansatz, self.trainable_parameters, self.trainable_to_original_params_map = \
-            self.reorganize(transpiled_ansatz)
+        transpiled_ansatz.draw('mpl', filename=f'UCCSD_{self.num_qubits}.png')
+        self.trainable_ansatz = transpiled_ansatz
+        self.trainable_parameters = self.original_parameters
+        # self.trainable_ansatz, self.trainable_parameters, self.trainable_to_original_params_map = \
+        #     self.reorganize(transpiled_ansatz)
     
     def parameters(self):
         return self.original_parameters
@@ -142,39 +146,96 @@ class TrainableUCCSD:
             print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval}")
         return ret
 
+    def _evaluate_by_trainable_ansatz_with_code(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+
+        parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
+        bit_flip = pauli_error([('X', noise_rate), ('I', 1 - noise_rate)])
+        noise_model = NoiseModel()
+
+        # Add depolarizing error to all single qubit u1, u2, u3 gates
+        error = bit_flip.tensor(bit_flip)
+        noise_model.add_all_qubit_quantum_error(error, ['cx'])
+
+        # Print noise model info
+        print(noise_model)
+        backend = AerSimulator(noise_model=noise_model, shots=10000)
+        ret = 0
+        coded_circuit = convert_to_icebergcode_circuit(parameterized_ansatz)
+        k = parameterized_ansatz.num_qubits
+        t = coded_circuit.num_qubits - 4
+        b = coded_circuit.num_qubits - 3
+        a1 = coded_circuit.num_qubits - 2
+        a2 = coded_circuit.num_qubits - 1
+        for pauli, coeff in zip(self.paulis, self.coeffs):
+            circuit_with_measure_basis = QuantumCircuit(coded_circuit.num_qubits, coded_circuit.num_qubits)
+            circuit_with_measure_basis = circuit_with_measure_basis.compose(coded_circuit)
+            convert_measurement_basis(circuit_with_measure_basis, pauli, t, b)
+            add_icebergcode_measurement(circuit_with_measure_basis, k, t, b)
+            result = backend.run(circuit_with_measure_basis).result()
+            def analyze_counts(counts, pauli):
+                expval = 0
+                sum_values = 0
+                for bitstring, count in counts.items():
+                    bit_val = 1
+                    # print("Bitstring:", bitstring)
+                    if bitstring[:2] != '00' or bitstring[-b-1:].count('1') % 2 != 0:
+                        continue
+                    # assert bitstring[:2] == '00'
+                    # assert bitstring[-b-1:].count('1') % 2 == 0
+                    if bitstring[-b-1] == '0':
+                        bs = bitstring[-t:]
+                    else:
+                        bs = ''.join('1' if x == '0' else '0' for x in bitstring[-t:])
+                    for i, p in enumerate(pauli[::-1]):
+                        if p == 'I':
+                            continue
+                        elif p == 'X' or p == 'Y' or p == 'Z':
+                            if bs[-i-1] == '1':
+                                bit_val *= -1
+                    expval += bit_val * count
+                    sum_values += count
+                expval /= sum_values
+                return expval
+            counts = result.get_counts()
+            expval = analyze_counts(counts, pauli)
+            ret += expval * coeff
+            print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval}")
+        return ret
+
     def evaluate_objective_function(self, param_dict: dict[Parameter, float])-> float:
         """
         Evaluate the objective function for the ansatz.
         """
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
-        return self._evaluate_by_trainable_ansatz(trainable_param_values)
+        # trainable_param_values = {}
+        # for new_param, old_param in self.trainable_to_original_params_map.items():
+        #     value = param_dict[old_param]
+        #     trainable_param_values[new_param] = value
+        return self._evaluate_by_trainable_ansatz(param_dict)
 
     def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
         """
         Evaluate the objective function for the ansatz.
         """
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
-        return self._evaluate_by_trainable_ansatz_with_noise(trainable_param_values, noise_rate)
+        # trainable_param_values = {}
+        # for new_param, old_param in self.trainable_to_original_params_map.items():
+        #     value = param_dict[old_param]
+        #     trainable_param_values[new_param] = value
+        return self._evaluate_by_trainable_ansatz_with_code(param_dict, noise_rate)
 
-    def calculate_gradient(self, param_dict: dict[Parameter, float])->dict[Parameter, float]:
-        trainable_param_values = {}
-        for new_param, old_param in self.trainable_to_original_params_map.items():
-            value = param_dict[old_param]
-            trainable_param_values[new_param] = value
+
+    # def calculate_gradient(self, param_dict: dict[Parameter, float])->dict[Parameter, float]:
+    #     trainable_param_values = {}
+    #     for new_param, old_param in self.trainable_to_original_params_map.items():
+    #         value = param_dict[old_param]
+    #         trainable_param_values[new_param] = value
         
-        grad_old_params = {old_param: 0. for old_param in param_dict.keys()}
-        for new_param, old_param in tqdm(self.trainable_to_original_params_map.items()):
-            trainable_param_values[new_param] += np.pi/2
-            f1 = self._evaluate_by_trainable_ansatz(trainable_param_values)
-            trainable_param_values[new_param] -= np.pi
-            f2 = self._evaluate_by_trainable_ansatz(trainable_param_values)
-            trainable_param_values[new_param] += np.pi/2
-            grad = (f1 - f2)/2
-            grad_old_params[old_param] += grad
-        return grad_old_params
+    #     grad_old_params = {old_param: 0. for old_param in param_dict.keys()}
+    #     for new_param, old_param in tqdm(self.trainable_to_original_params_map.items()):
+    #         trainable_param_values[new_param] += np.pi/2
+    #         f1 = self._evaluate_by_trainable_ansatz(trainable_param_values)
+    #         trainable_param_values[new_param] -= np.pi
+    #         f2 = self._evaluate_by_trainable_ansatz(trainable_param_values)
+    #         trainable_param_values[new_param] += np.pi/2
+    #         grad = (f1 - f2)/2
+    #         grad_old_params[old_param] += grad
+    #     return grad_old_params

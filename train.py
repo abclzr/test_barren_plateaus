@@ -20,9 +20,9 @@ from vqa.ansatz.HWPA import TrainableHWPA
 from vqa.ansatz.BeamSplitter import Trainable_HWPA_BeamSplitter
 
 
-mole_name = 'LiH'
-mapper_name = 'jordan_wigner'
-ansatz_name = 'HWPA'
+mole_name = 'H2'
+mapper_name = 'bravyi_kitaev'
+ansatz_name = 'UCCSD'
 method = 'BFGS'
 reps = 83
 
@@ -91,6 +91,7 @@ def scipy_gradient(params):
 print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 # Perform COBYLA optimization
 start_cobyla = time.time()
+
 result_cobyla = minimize(
     fun=scipy_objective,
     x0=initial_params,
@@ -114,7 +115,9 @@ with open(output_path, "wb") as f:
     pickle.dump(result_cobyla, f)
 print(f"COBYLA result saved to {output_path}")
 print("Minimum objective function value:", scipy_objective.min_ret)
-
+print("Number of observable Pauli strings: ", len(paulis))
+print(paulis)
+print(coeffs)
 # Perform gradient descent optimization
 # result = minimize(
 #     fun=scipy_objective,

@@ -36,7 +36,7 @@ with open(filename, "rb") as f:
 print(f"Loaded optimization result from {filename}")
 driver_dict = {
     'H2': PySCFDriver(atom="H .0 .0 .0; H .0 .0 0.735", basis='sto3g'),
-    'LiH': PySCFDriver(atom="Li .0 .0 .0; H .0 .0 1.6", basis='sto3g'),
+    'LiH': PySCFDriver(atom="Li .0 .0 .0; H .0 .0 1.5699", basis='sto3g'),
     'BeH2': PySCFDriver(atom="Be .0 .0 .0; H .0 .0 -1.3; H .0 .0 1.3", basis='sto3g'),
     'CH4': PySCFDriver(atom="C .0 .0 .0; H .0 .0 1.0; H .0 .0 -1.0; H .0 1.0 .0; H .0 -1.0 .0", basis='sto3g'),
     'MgH2': PySCFDriver(atom="Mg .0 .0 .0; H .0 .0 -1.3; H .0 .0 1.3", basis='sto3g'),
@@ -92,7 +92,7 @@ print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 optimized_params_cobyla = dict(zip(ansatz.parameters(), result_cobyla.x))
 print("COBYLA Optimized Parameters:", optimized_params_cobyla)
 results = []
-for noise_rate in [0]:#, 0.00001, 0.0001, 0.001, 0.01]:
+for noise_rate in [0, 0.00001, 0.0001, 0.001, 0.01]:
     value = objective_function(optimized_params_cobyla, noise_rate)
     print("COBYLA Optimized Objective Function Value:", value, f"with noise rate {noise_rate}")
     results.append((noise_rate, value))

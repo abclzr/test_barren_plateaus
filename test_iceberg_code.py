@@ -4,7 +4,7 @@ import pdb
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import Pauli, SparsePauliOp, Statevector
 
-k = 2
+k = 6
 n = k + 2
 t = k
 b = k + 1
