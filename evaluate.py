@@ -8,6 +8,8 @@ from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper, BravyiKitaevMapper, ParityMapper
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit import QuantumCircuit, transpile
+from qiskit_aer.noise import (NoiseModel, QuantumError, ReadoutError,
+    pauli_error, depolarizing_error, thermal_relaxation_error)
 
 from qiskit_aer import AerSimulator
 from qiskit_aer.quantum_info import AerStatevector
@@ -70,9 +72,9 @@ elif ansatz_name == 'HWPA':
 ansatz.set_objective_function(paulis, coeffs)
 print(ansatz.trainable_ansatz.count_ops())
 
-def objective_function(param_values, noise_rate=0):
+def objective_function(param_values, noise_model=None):
     # return ansatz.evaluate_objective_function(param_values)
-    return ansatz.evaluate_objective_function_with_noise(param_values, noise_rate)
+    return ansatz.evaluate_objective_function_with_noise(param_values, noise_model)
 
 # Convert parameters to a numpy array for optimization
 initial_params = np.array([0. for param in ansatz.parameters()])
@@ -84,7 +86,7 @@ def scipy_objective(params):
     print(f"time: {time.strftime('%Y-%m-%d %H:%M:%S')}, Current parameters: {params}, Objective function value: {ret}")
     return ret
 
-print(f'Hartree Fock Energy: {scipy_objective(initial_params)}')
+# print(f'Hartree Fock Energy: {scipy_objective(initial_params)}')
 
 print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 
@@ -92,8 +94,9 @@ print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 optimized_params_cobyla = dict(zip(ansatz.parameters(), result_cobyla.x))
 print("COBYLA Optimized Parameters:", optimized_params_cobyla)
 results = []
-for noise_rate in [0, 0.00001, 0.0001, 0.001, 0.01]:
-    value = objective_function(optimized_params_cobyla, noise_rate)
-    print("COBYLA Optimized Objective Function Value:", value, f"with noise rate {noise_rate}")
-    results.append((noise_rate, value))
-print("All results:", results)
+noise_model = NoiseModel()
+noise_model.add_all_qubit_quantum_error(depolarizing_error(0.0004, 1), ['u1', 'u2', 'u3', 'h', 's', 'sdg', 'rx', 'ry', 'rz'])
+noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003, 2), ['cx', 'cz', 'rzz', 'rxx', 'ryy'])
+noise_model.add_all_qubit_readout_error(ReadoutError([[0.997, 0.003], [0.003, 0.997]]))
+value = objective_function(optimized_params_cobyla, noise_model)
+print("COBYLA Optimized Objective Function Value:", value)

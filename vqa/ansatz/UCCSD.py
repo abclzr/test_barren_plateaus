@@ -87,16 +87,9 @@ class TrainableUCCSD:
             total_energy += expectation * coeff
         return total_energy
 
-    def _evaluate_by_trainable_ansatz_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+    def _evaluate_by_trainable_ansatz_with_noise(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
 
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
-        bit_flip = pauli_error([('X', noise_rate), ('I', 1 - noise_rate)])
-        noise_model = NoiseModel()
-
-        # Add depolarizing error to all single qubit u1, u2, u3 gates
-        error = bit_flip.tensor(bit_flip)
-        noise_model.add_all_qubit_quantum_error(error, ['cx'])
-
         # Print noise model info
         print(noise_model)
         backend = AerSimulator(noise_model=noise_model, shots=10000)
@@ -125,10 +118,12 @@ class TrainableUCCSD:
             result = backend.run(circuit_with_measure_basis).result()
             def analyze_counts(counts, pauli):
                 expval = 0
-                sum_values = 0
+                sum_discard = 0
+                sum_keep = 0
                 for bitstring, count in counts.items():
                     bit_val = 1
                     if bitstring[0] == '1':
+                        sum_discard += count
                         continue
                     for i, p in enumerate(pauli[::-1]):
                         if p == 'I':
@@ -137,48 +132,48 @@ class TrainableUCCSD:
                             if bitstring[-i-1] == '1':
                                 bit_val *= -1
                     expval += bit_val * count
-                    sum_values += count
-                expval /= sum_values
-                return expval
+                    sum_keep += count
+                expval /= sum_keep
+                return expval, sum_keep, sum_discard
             counts = result.get_counts()
-            expval = analyze_counts(counts, pauli)
+            expval, sum_keep, sum_discard = analyze_counts(counts, pauli)
             ret += expval * coeff
-            print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval}")
+            print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval} Shots kept: {sum_keep}, Shots discarded: {sum_discard}")
         return ret
 
-    def _evaluate_by_trainable_ansatz_with_code(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+    def _evaluate_by_trainable_ansatz_with_code(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
 
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
-        bit_flip = pauli_error([('X', noise_rate), ('I', 1 - noise_rate)])
-        noise_model = NoiseModel()
-
-        # Add depolarizing error to all single qubit u1, u2, u3 gates
-        error = bit_flip.tensor(bit_flip)
-        noise_model.add_all_qubit_quantum_error(error, ['cx'])
 
         # Print noise model info
         print(noise_model)
         backend = AerSimulator(noise_model=noise_model, shots=10000)
         ret = 0
-        coded_circuit = convert_to_icebergcode_circuit(parameterized_ansatz)
+        coded_circuit = convert_to_icebergcode_circuit(parameterized_ansatz, syndrome_measurement_per_gates=10)
         k = parameterized_ansatz.num_qubits
         t = coded_circuit.num_qubits - 4
         b = coded_circuit.num_qubits - 3
         a1 = coded_circuit.num_qubits - 2
         a2 = coded_circuit.num_qubits - 1
         for pauli, coeff in zip(self.paulis, self.coeffs):
-            circuit_with_measure_basis = QuantumCircuit(coded_circuit.num_qubits, coded_circuit.num_qubits)
+            circuit_with_measure_basis = QuantumCircuit(coded_circuit.num_qubits, coded_circuit.num_clbits)
             circuit_with_measure_basis = circuit_with_measure_basis.compose(coded_circuit)
             convert_measurement_basis(circuit_with_measure_basis, pauli, t, b)
             add_icebergcode_measurement(circuit_with_measure_basis, k, t, b)
             result = backend.run(circuit_with_measure_basis).result()
             def analyze_counts(counts, pauli):
                 expval = 0
-                sum_values = 0
+                post_select = '0' * (coded_circuit.num_clbits - coded_circuit.num_qubits+2)
+                sum_total = 0
+                sum_discard = 0
+                sum_keep = 0
                 for bitstring, count in counts.items():
                     bit_val = 1
                     # print("Bitstring:", bitstring)
-                    if bitstring[:2] != '00' or bitstring[-b-1:].count('1') % 2 != 0:
+                    if bitstring[:-b-1] != post_select or bitstring[-b-1:].count('1') % 2 != 0:
+                        print(bitstring[:-b-1])
+                        print(post_select)
+                        sum_discard += count
                         continue
                     # assert bitstring[:2] == '00'
                     # assert bitstring[-b-1:].count('1') % 2 == 0
@@ -193,13 +188,13 @@ class TrainableUCCSD:
                             if bs[-i-1] == '1':
                                 bit_val *= -1
                     expval += bit_val * count
-                    sum_values += count
-                expval /= sum_values
-                return expval
+                    sum_keep += count
+                expval /= sum_keep
+                return expval, sum_keep, sum_discard
             counts = result.get_counts()
-            expval = analyze_counts(counts, pauli)
+            expval, sum_keep, sum_discard = analyze_counts(counts, pauli)
             ret += expval * coeff
-            print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval}")
+            print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval} Shots kept: {sum_keep}, Shots discarded: {sum_discard}")
         return ret
 
     def evaluate_objective_function(self, param_dict: dict[Parameter, float])-> float:
@@ -212,7 +207,7 @@ class TrainableUCCSD:
         #     trainable_param_values[new_param] = value
         return self._evaluate_by_trainable_ansatz(param_dict)
 
-    def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+    def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
         """
         Evaluate the objective function for the ansatz.
         """
@@ -220,7 +215,7 @@ class TrainableUCCSD:
         # for new_param, old_param in self.trainable_to_original_params_map.items():
         #     value = param_dict[old_param]
         #     trainable_param_values[new_param] = value
-        return self._evaluate_by_trainable_ansatz_with_code(param_dict, noise_rate)
+        return self._evaluate_by_trainable_ansatz_with_code(param_dict, noise_model)
 
 
     # def calculate_gradient(self, param_dict: dict[Parameter, float])->dict[Parameter, float]:

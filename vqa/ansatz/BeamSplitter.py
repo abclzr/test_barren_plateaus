@@ -144,15 +144,9 @@ class Trainable_HWPA_BeamSplitter:
             total_energy += expectation * coeff
         return total_energy
 
-    def _evaluate_by_trainable_ansatz_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+    def _evaluate_by_trainable_ansatz_with_noise(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
 
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
-        bit_flip = pauli_error([('X', noise_rate), ('I', 1 - noise_rate)])
-        noise_model = NoiseModel()
-
-        # Add depolarizing error to all single qubit u1, u2, u3 gates
-        error = bit_flip.tensor(bit_flip)
-        noise_model.add_all_qubit_quantum_error(error, ['cx'])
 
         # Print noise model info
         print(noise_model)
@@ -210,8 +204,8 @@ class Trainable_HWPA_BeamSplitter:
         """
         return self._evaluate_by_trainable_ansatz(param_dict)
 
-    def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_rate: float)-> float:
+    def evaluate_objective_function_with_noise(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
         """
         Evaluate the objective function for the ansatz.
         """
-        return self._evaluate_by_trainable_ansatz_with_noise(param_dict, noise_rate)
+        return self._evaluate_by_trainable_ansatz_with_noise(param_dict, noise_model)
