@@ -95,15 +95,15 @@ class TrainableUCCSD:
         backend = AerSimulator(noise_model=noise_model, shots=10000)
         ret = 0
         for pauli, coeff in zip(self.paulis, self.coeffs):
-            circuit_with_measure_basis = QuantumCircuit(self.num_qubits+1, self.num_clbits+1)
+            circuit_with_measure_basis = QuantumCircuit(self.num_qubits, self.num_clbits)
             circuit_with_measure_basis = circuit_with_measure_basis.compose(parameterized_ansatz)
             def cx_sequence(circuit, sequence):
                 for control in sequence:
                     circuit.cx(control, control+1)
-            cx_sequence(circuit_with_measure_basis, list(range(self.num_qubits)))
-            circuit_with_measure_basis.reset(self.num_qubits)
-            circuit_with_measure_basis.measure(self.num_qubits, self.num_clbits)
-            cx_sequence(circuit_with_measure_basis, list(range(self.num_qubits-1, -1, -1)))
+            # cx_sequence(circuit_with_measure_basis, list(range(self.num_qubits)))
+            # circuit_with_measure_basis.reset(self.num_qubits)
+            # circuit_with_measure_basis.measure(self.num_qubits, self.num_clbits)
+            # cx_sequence(circuit_with_measure_basis, list(range(self.num_qubits-1, -1, -1)))
             for i, p in enumerate(pauli[::-1]):
                 if p == 'I' or p == 'Z':
                     circuit_with_measure_basis.measure(i, i)
@@ -122,9 +122,9 @@ class TrainableUCCSD:
                 sum_keep = 0
                 for bitstring, count in counts.items():
                     bit_val = 1
-                    if bitstring[0] == '1':
-                        sum_discard += count
-                        continue
+                    # if bitstring[0] == '1':
+                    #     sum_discard += count
+                    #     continue
                     for i, p in enumerate(pauli[::-1]):
                         if p == 'I':
                             continue
@@ -149,7 +149,7 @@ class TrainableUCCSD:
         print(noise_model)
         backend = AerSimulator(noise_model=noise_model, shots=10000)
         ret = 0
-        coded_circuit = convert_to_icebergcode_circuit(parameterized_ansatz, syndrome_measurement_per_gates=10)
+        coded_circuit = convert_to_icebergcode_circuit(parameterized_ansatz, syndrome_measurement_per_gates=1)
         k = parameterized_ansatz.num_qubits
         t = coded_circuit.num_qubits - 4
         b = coded_circuit.num_qubits - 3
