@@ -86,8 +86,8 @@ ansatz = UCCSD(
 
 param2 = result_cobyla.x[2]
 
-circ = QuantumCircuit(12, 20)
-clbit_allocator = ClassicalRegisterAllocator(20)
+circ = QuantumCircuit(12, 30)
+clbit_allocator = ClassicalRegisterAllocator(30)
 block1_builder = _4_2_2_Code_Builder(circ, 0, 1, 2, 3, 8, 9, clbit_allocator)
 block2_builder = _4_2_2_Code_Builder(circ, 4, 5, 6, 7, 10, 11, clbit_allocator)
 block1_builder.initialize()
@@ -162,6 +162,9 @@ for i, pauli_coeff_pair in enumerate(double_excitation_ansatz_operator):
     #     block2_builder.logical_RZ(np.pi / 2, 1)
     # if pauli.z[3] and pauli.x[3]:
     #     block2_builder.logical_RZ(np.pi / 2, 2)
+    if i == 3 or i == 7:
+        block1_builder.syndrome_measurement()
+        block2_builder.syndrome_measurement()
 
 block1_builder.transversal_Hadamard()
 block2_builder.transversal_Hadamard()
@@ -204,12 +207,12 @@ for pauli, coeff in zip(paulis, coeffs):
             # print("Bitstring:", bitstring)
             decode1 = block1_builder_with_measure_basis.decode(bitstring)
             if decode1 == 'invalid':
-                print(bitstring)
+                # print(bitstring)
                 sum_discard += count
                 continue
             decode2 = block2_builder_with_measure_basis.decode(bitstring)
             if decode2 == 'invalid':
-                print(bitstring)
+                # print(bitstring)
                 sum_discard += count
                 continue
             decode_bitstring = decode1 + decode2

@@ -144,6 +144,7 @@ class TrainableUCCSD:
     def _evaluate_by_trainable_ansatz_with_code(self, param_dict: dict[Parameter, float], noise_model: NoiseModel)-> float:
 
         parameterized_ansatz = self.trainable_ansatz.assign_parameters(param_dict)
+        pdb.set_trace()
 
         # Print noise model info
         print(noise_model)
