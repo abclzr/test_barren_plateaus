@@ -58,7 +58,7 @@ class _4_2_2_Code_Builder:
         self.base_circuit.h(self.b)
         self.base_circuit.h(self.q1)
         self.base_circuit.h(self.q2)
-        self.base_circuit.swap(self.q1, self.q2)
+        # self.base_circuit.swap(self.q1, self.q2)
     
     def transversal_CNOT(self, other_code_builder):
         self.base_circuit.cx(self.t, other_code_builder.t)
@@ -133,9 +133,9 @@ class _4_2_2_Code_Builder:
     
     def decode(self, bitstring: str) -> str:
         for syndrome_bit_index in self.syndrome_bits:
-            if bitstring[-syndrome_bit_index] == '1':
+            if bitstring[-syndrome_bit_index-1] == '1':
                 return 'invalid'
-        measured_bitstring = ''.join([bitstring[-self.cbits[0]], bitstring[-self.cbits[1]], bitstring[-self.cbits[2]], bitstring[-self.cbits[3]]])
+        measured_bitstring = ''.join([bitstring[-self.cbits[0]-1], bitstring[-self.cbits[1]-1], bitstring[-self.cbits[2]-1], bitstring[-self.cbits[3]-1]])
         if measured_bitstring.count('1') % 2 == 1:
             return 'invalid'
         if measured_bitstring[3] == '0':
@@ -143,7 +143,7 @@ class _4_2_2_Code_Builder:
         else:
             return ''.join(['1' if bit == '0' else '0' for bit in measured_bitstring[1:3]])
     
-    def copy_for_a_new_circuit(self, new_base_circuit: QuantumCircuit):
-        new_builder = _4_2_2_Code_Builder(new_base_circuit, self.t, self.b, self.q1, self.q2, self.a1, self.a2, self.clbit_allocator.copy())
+    def copy_for_a_new_circuit(self, new_base_circuit: QuantumCircuit, new_clbit_allocator: ClassicalRegisterAllocator):
+        new_builder = _4_2_2_Code_Builder(new_base_circuit, self.t, self.b, self.q1, self.q2, self.a1, self.a2, new_clbit_allocator)
         new_builder.syndrome_bits = self.syndrome_bits.copy()
         return new_builder

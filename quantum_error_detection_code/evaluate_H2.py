@@ -3,6 +3,7 @@ import pickle
 import os
 import numpy as np
 import time
+import sys
 
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper, BravyiKitaevMapper, ParityMapper
@@ -18,12 +19,15 @@ from scipy.optimize import minimize
 from qiskit_ibm_runtime import QiskitRuntimeService, Session
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from _4_2_2_code_builder import _4_2_2_Code_Builder, ClassicalRegisterAllocator
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from vqa.ansatz.UCCSD import TrainableUCCSD
 
 noise_level = 1
 noise_model = NoiseModel()
-# noise_model.add_all_qubit_quantum_error(depolarizing_error(0.0004 * noise_level, 1), ['u1', 'u2', 'u3', 's', 'x', 'sdg', 'rx', 'ry', 'rz'])
-# noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003 * noise_level, 2), ['rzz', 'rxx', 'ryy'])
-# noise_model.add_all_qubit_readout_error(ReadoutError([[1 - 0.003 * noise_level, 0.003 * noise_level], [0.003 * noise_level, 1 - 0.003 * noise_level]]))
+noise_model.add_all_qubit_quantum_error(depolarizing_error(0.0004 * noise_level, 1), ['u1', 'u2', 'u3', 's', 'x', 'sdg', 'rx', 'ry', 'rz'])
+noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003 * noise_level, 2), ['rzz', 'rxx', 'ryy', 'cx'])
+noise_model.add_all_qubit_readout_error(ReadoutError([[1 - 0.003 * noise_level, 0.003 * noise_level], [0.003 * noise_level, 1 - 0.003 * noise_level]]))
 
 backend = AerSimulator(noise_model=noise_model, shots=10000)
 mole_name = 'H2'
@@ -79,10 +83,11 @@ ansatz = UCCSD(
         mapper,
     ),
 )
+
 param2 = result_cobyla.x[2]
 
-circ = QuantumCircuit(12, 12)
-clbit_allocator = ClassicalRegisterAllocator(12)
+circ = QuantumCircuit(12, 20)
+clbit_allocator = ClassicalRegisterAllocator(20)
 block1_builder = _4_2_2_Code_Builder(circ, 0, 1, 2, 3, 8, 9, clbit_allocator)
 block2_builder = _4_2_2_Code_Builder(circ, 4, 5, 6, 7, 10, 11, clbit_allocator)
 block1_builder.initialize()
@@ -91,39 +96,85 @@ block1_builder.logical_X(1)
 block2_builder.logical_X(1)
 
 double_excitation_ansatz_operator = ansatz.operators[2]
+ps_list = []
 for pauli_coeff_pair in double_excitation_ansatz_operator:
     pauli = pauli_coeff_pair.paulis[0]
     coeff = pauli_coeff_pair.coeffs[0]
-    block1_builder.transversal_Hadamard()
-    block2_builder.transversal_Hadamard()
-    if pauli[-1] == 'Y':
-        block1_builder.logical_RX(-np.pi / 2, 1)
-    if pauli[-2] == 'Y':
+    ps = []
+    for i in range(4):
+        if pauli.z[i]:
+            if pauli.x[i]:
+                ps.append('Y')
+            else:
+                ps.append('Z')
+        else:
+            ps.append('X')
+    ps_list.append(''.join(ps))
+previous_same = []
+posterior_same = []
+for i, ps in enumerate(ps_list):
+    if i == 0:
+        previous_same.append([False for _ in range(4)])
+    else:
+        previous_same.append([ps[j] == ps_list[i-1][j] for j in range(4)])
+    if i == len(ps_list) - 1:
+        posterior_same.append([False for _ in range(4)])
+    else:
+        posterior_same.append([ps[j] == ps_list[i+1][j] for j in range(4)])
+    
+block1_builder.transversal_Hadamard()
+block2_builder.transversal_Hadamard()
+for i, pauli_coeff_pair in enumerate(double_excitation_ansatz_operator):
+    pauli = pauli_coeff_pair.paulis[0]
+    coeff = pauli_coeff_pair.coeffs[0]
+    # if pauli.z[0] and pauli.x[0]:
+    #     block1_builder.logical_RZ(-np.pi / 2, 1)
+    # if pauli.z[1] and pauli.x[1]:
+    #     block1_builder.logical_RZ(-np.pi / 2, 2)
+    # if pauli.z[2] and pauli.x[2]:
+    #     block2_builder.logical_RZ(-np.pi / 2, 1)
+    # if pauli.z[3] and pauli.x[3]:
+    #     block2_builder.logical_RZ(-np.pi / 2, 2)
+    if pauli.z[0] and pauli.x[0] and not previous_same[i][0]:
         block1_builder.logical_RX(-np.pi / 2, 2)
-    if pauli[-3] == 'Y':
-        block2_builder.logical_RX(-np.pi / 2, 1)
-    if pauli[-4] == 'Y':
+    if pauli.z[1] and pauli.x[1] and not previous_same[i][1]:
+        block1_builder.logical_RX(-np.pi / 2, 1)
+    if pauli.z[2] and pauli.x[2] and not previous_same[i][2]:
         block2_builder.logical_RX(-np.pi / 2, 2)
+    if pauli.z[3] and pauli.x[3] and not previous_same[i][3]:
+        block2_builder.logical_RX(-np.pi / 2, 1)
     block1_builder.transversal_CNOT(block2_builder)
-    block2_builder.logical_RZZ(coeff * 2 * param2)
+    block2_builder.logical_RZZ(coeff.real * 2 * param2)
     block1_builder.transversal_CNOT(block2_builder)
-    if pauli[-1] == 'Y':
-        block1_builder.logical_RX(np.pi / 2, 1)
-    if pauli[-2] == 'Y':
+    if pauli.z[0] and pauli.x[0] and not posterior_same[i][0]:
         block1_builder.logical_RX(np.pi / 2, 2)
-    if pauli[-3] == 'Y':
-        block2_builder.logical_RX(np.pi / 2, 1)
-    if pauli[-4] == 'Y':
+    if pauli.z[1] and pauli.x[1] and not posterior_same[i][1]:
+        block1_builder.logical_RX(np.pi / 2, 1)
+    if pauli.z[2] and pauli.x[2] and not posterior_same[i][2]:
         block2_builder.logical_RX(np.pi / 2, 2)
-    block1_builder.transversal_Hadamard()
-    block2_builder.transversal_Hadamard()
+    if pauli.z[3] and pauli.x[3] and not posterior_same[i][3]:
+        block2_builder.logical_RX(np.pi / 2, 1)
+    # if pauli.z[0] and pauli.x[0]:
+    #     block1_builder.logical_RZ(np.pi / 2, 1)
+    # if pauli.z[1] and pauli.x[1]:
+    #     block1_builder.logical_RZ(np.pi / 2, 2)
+    # if pauli.z[2] and pauli.x[2]:
+    #     block2_builder.logical_RZ(np.pi / 2, 1)
+    # if pauli.z[3] and pauli.x[3]:
+    #     block2_builder.logical_RZ(np.pi / 2, 2)
 
+block1_builder.transversal_Hadamard()
+block2_builder.transversal_Hadamard()
+
+circ = transpile(circ, optimization_level=3, basis_gates=['rzz', 'h', 'rz', 'x', 'cx', 'swap', 'rxx'])
+print(circ)
 final_expval = 0
 for pauli, coeff in zip(paulis, coeffs):
     circuit_with_measure_basis = QuantumCircuit(circ.num_qubits, circ.num_clbits)
     circuit_with_measure_basis = circuit_with_measure_basis.compose(circ)
-    block1_builder_with_measure_basis = block1_builder.copy_for_a_new_circuit(circuit_with_measure_basis)
-    block2_builder_with_measure_basis = block2_builder.copy_for_a_new_circuit(circuit_with_measure_basis)
+    clbit_allocator_with_measure_basis = clbit_allocator.copy()
+    block1_builder_with_measure_basis = block1_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
+    block2_builder_with_measure_basis = block2_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
     map_codeblock_and_qubit = {
         0:(block1_builder_with_measure_basis, 1),
         1:(block1_builder_with_measure_basis, 2),
@@ -172,6 +223,8 @@ for pauli, coeff in zip(paulis, coeffs):
             sum_keep += count
         expval /= sum_keep
         return expval, sum_keep, sum_discard
+    circuit_with_measure_basis = transpile(circuit_with_measure_basis, optimization_level=3, basis_gates=['rzz', 'h', 'rz', 'x', 'cx', 'swap', 'rxx'])
+
     result = backend.run(circuit_with_measure_basis).result()
     expval, sum_keep, sum_discard = analyze_counts(result.get_counts(), pauli)
     final_expval += expval * coeff
@@ -179,12 +232,13 @@ for pauli, coeff in zip(paulis, coeffs):
 
 print(f"Final expval: {final_expval}")
 exit()
+ansatz = TrainableUCCSD(problem.num_spatial_orbitals, problem.num_particles, mapper)
+ansatz.set_objective_function(paulis, coeffs)
+
 def objective_function(param_values, noise_model=None):
     # return ansatz.evaluate_objective_function(param_values)
     return ansatz.evaluate_objective_function_with_noise(param_values, noise_model)
 
-# Convert parameters to a numpy array for optimization
-initial_params = np.array([0. for param in ansatz.parameters()])
 
 # Define a wrapper for the optimizer
 def scipy_objective(params):
@@ -200,6 +254,8 @@ print(f'Nuclear repulsion energy: {problem.nuclear_repulsion_energy}')
 # Update map_param_values with optimized parameters from COBYLA
 optimized_params_cobyla = dict(zip(ansatz.parameters(), result_cobyla.x))
 print("COBYLA Optimized Parameters:", optimized_params_cobyla)
+print("UCCSD: ", objective_function(optimized_params_cobyla, NoiseModel()))
+exit()
 results = []
 for noise_level in [1e-3, 1e-2, 1e-1, 1]:
     noise_model = NoiseModel()
