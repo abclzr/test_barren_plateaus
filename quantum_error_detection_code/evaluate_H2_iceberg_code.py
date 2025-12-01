@@ -19,6 +19,7 @@ from scipy.optimize import minimize
 from qiskit_ibm_runtime import QiskitRuntimeService, Session
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from _4_2_2_code_builder import _4_2_2_Code_Builder
+from iceberg_code_builder import Iceberg_Code_Builder
 from classical_register_allocator import ClassicalRegisterAllocator
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -26,9 +27,9 @@ from vqa.ansatz.UCCSD import TrainableUCCSD
 
 noise_level = 1
 noise_model = NoiseModel()
-noise_model.add_all_qubit_quantum_error(depolarizing_error(0.0004 * noise_level, 1), ['u1', 'u2', 'u3', 's', 'x', 'sdg', 'rx', 'ry', 'rz'])
-noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003 * noise_level, 2), ['rzz', 'rxx', 'ryy', 'cx'])
-noise_model.add_all_qubit_readout_error(ReadoutError([[1 - 0.003 * noise_level, 0.003 * noise_level], [0.003 * noise_level, 1 - 0.003 * noise_level]]))
+# noise_model.add_all_qubit_quantum_error(depolarizing_error(0.0004 * noise_level, 1), ['u1', 'u2', 'u3', 's', 'x', 'sdg', 'rx', 'ry', 'rz'])
+# noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003 * noise_level, 2), ['rzz', 'rxx', 'ryy', 'cx'])
+# noise_model.add_all_qubit_readout_error(ReadoutError([[1 - 0.003 * noise_level, 0.003 * noise_level], [0.003 * noise_level, 1 - 0.003 * noise_level]]))
 
 backend = AerSimulator(noise_model=noise_model, shots=10000)
 mole_name = 'H2'
@@ -87,14 +88,12 @@ ansatz = UCCSD(
 
 param2 = result_cobyla.x[2]
 
-circ = QuantumCircuit(12, 30)
+circ = QuantumCircuit(8, 30)
 clbit_allocator = ClassicalRegisterAllocator(30)
-block1_builder = _4_2_2_Code_Builder(circ, 0, 1, 2, 3, 8, 9, clbit_allocator)
-block2_builder = _4_2_2_Code_Builder(circ, 4, 5, 6, 7, 10, 11, clbit_allocator)
-block1_builder.initialize()
-block2_builder.initialize()
-block1_builder.logical_X(1)
-block2_builder.logical_X(1)
+code_builder = Iceberg_Code_Builder(circ, 0, 5, [1, 2, 3, 4], 6, 7, clbit_allocator)
+code_builder.initialize()
+code_builder.logical_X(0)
+code_builder.logical_X(2)
 
 double_excitation_ansatz_operator = ansatz.operators[2]
 ps_list = []
@@ -122,53 +121,27 @@ for i, ps in enumerate(ps_list):
         posterior_same.append([False for _ in range(4)])
     else:
         posterior_same.append([ps[j] == ps_list[i+1][j] for j in range(4)])
-    
-block1_builder.transversal_Hadamard()
-block2_builder.transversal_Hadamard()
+
+for i in range(4):
+    code_builder.logical_RX(np.pi/2, i)
+    code_builder.logical_RZ(np.pi/2, i)
 for i, pauli_coeff_pair in enumerate(double_excitation_ansatz_operator):
     pauli = pauli_coeff_pair.paulis[0]
     coeff = pauli_coeff_pair.coeffs[0]
-    # if pauli.z[0] and pauli.x[0]:
-    #     block1_builder.logical_RZ(-np.pi / 2, 1)
-    # if pauli.z[1] and pauli.x[1]:
-    #     block1_builder.logical_RZ(-np.pi / 2, 2)
-    # if pauli.z[2] and pauli.x[2]:
-    #     block2_builder.logical_RZ(-np.pi / 2, 1)
-    # if pauli.z[3] and pauli.x[3]:
-    #     block2_builder.logical_RZ(-np.pi / 2, 2)
-    if pauli.z[0] and pauli.x[0] and not previous_same[i][0]:
-        block1_builder.logical_RX(-np.pi / 2, 2)
-    if pauli.z[1] and pauli.x[1] and not previous_same[i][1]:
-        block1_builder.logical_RX(-np.pi / 2, 1)
-    if pauli.z[2] and pauli.x[2] and not previous_same[i][2]:
-        block2_builder.logical_RX(-np.pi / 2, 2)
-    if pauli.z[3] and pauli.x[3] and not previous_same[i][3]:
-        block2_builder.logical_RX(-np.pi / 2, 1)
-    block1_builder.transversal_CNOT(block2_builder)
-    block2_builder.logical_RZZ(coeff.real * 2 * param2)
-    block1_builder.transversal_CNOT(block2_builder)
-    if pauli.z[0] and pauli.x[0] and not posterior_same[i][0]:
-        block1_builder.logical_RX(np.pi / 2, 2)
-    if pauli.z[1] and pauli.x[1] and not posterior_same[i][1]:
-        block1_builder.logical_RX(np.pi / 2, 1)
-    if pauli.z[2] and pauli.x[2] and not posterior_same[i][2]:
-        block2_builder.logical_RX(np.pi / 2, 2)
-    if pauli.z[3] and pauli.x[3] and not posterior_same[i][3]:
-        block2_builder.logical_RX(np.pi / 2, 1)
-    # if pauli.z[0] and pauli.x[0]:
-    #     block1_builder.logical_RZ(np.pi / 2, 1)
-    # if pauli.z[1] and pauli.x[1]:
-    #     block1_builder.logical_RZ(np.pi / 2, 2)
-    # if pauli.z[2] and pauli.x[2]:
-    #     block2_builder.logical_RZ(np.pi / 2, 1)
-    # if pauli.z[3] and pauli.x[3]:
-    #     block2_builder.logical_RZ(np.pi / 2, 2)
-    if i == 3 or i == 7:
-        block1_builder.syndrome_measurement()
-        block2_builder.syndrome_measurement()
+    for j in range(4):
+        if pauli.z[j] and pauli.x[j] and not previous_same[i][j]:
+            code_builder.logical_RX(-np.pi / 2, j)
+    code_builder.logical_RZs(coeff.real * 2 * param2, [j for j in range(4)])
+    for j in range(4):
+        if pauli.z[j] and pauli.x[j] and not posterior_same[i][j]:
+            code_builder.logical_RX(np.pi / 2, j)
+    # if i == 3 or i == 7:
+    #     block1_builder.syndrome_measurement()
+    #     block2_builder.syndrome_measurement()
 
-block1_builder.transversal_Hadamard()
-block2_builder.transversal_Hadamard()
+for i in range(4):
+    code_builder.logical_RZ(-np.pi/2, i)
+    code_builder.logical_RX(-np.pi/2, i)
 
 circ = transpile(circ, optimization_level=3, basis_gates=['rzz', 'h', 'rz', 'x', 'cx', 'swap', 'rxx'])
 print(circ)
@@ -177,13 +150,12 @@ for pauli, coeff in zip(paulis, coeffs):
     circuit_with_measure_basis = QuantumCircuit(circ.num_qubits, circ.num_clbits)
     circuit_with_measure_basis = circuit_with_measure_basis.compose(circ)
     clbit_allocator_with_measure_basis = clbit_allocator.copy()
-    block1_builder_with_measure_basis = block1_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
-    block2_builder_with_measure_basis = block2_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
+    code_builder_with_measure_basis = code_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
     map_codeblock_and_qubit = {
-        0:(block1_builder_with_measure_basis, 1),
-        1:(block1_builder_with_measure_basis, 2),
-        2:(block2_builder_with_measure_basis, 1),
-        3:(block2_builder_with_measure_basis, 2)
+        0:(code_builder_with_measure_basis, 0),
+        1:(code_builder_with_measure_basis, 1),
+        2:(code_builder_with_measure_basis, 2),
+        3:(code_builder_with_measure_basis, 3)
     }
     for i, p in enumerate(pauli[::-1]):
         if p == 'I' or p == 'Z':
@@ -195,8 +167,7 @@ for pauli, coeff in zip(paulis, coeffs):
         elif p == 'Y':
             builder, qubit = map_codeblock_and_qubit[i]
             builder.logical_RX(np.pi/2, qubit)
-    cbits1 = block1_builder_with_measure_basis.measurement()
-    cbits2 = block2_builder_with_measure_basis.measurement()
+    cbits = code_builder_with_measure_basis.measurement()
 
     def analyze_counts(counts, pauli):
         expval = 0
@@ -206,17 +177,12 @@ for pauli, coeff in zip(paulis, coeffs):
         for bitstring, count in counts.items():
             bit_val = 1
             # print("Bitstring:", bitstring)
-            decode1 = block1_builder_with_measure_basis.decode(bitstring)
+            decode1 = code_builder_with_measure_basis.decode(bitstring)
             if decode1 == 'invalid':
                 # print(bitstring)
                 sum_discard += count
                 continue
-            decode2 = block2_builder_with_measure_basis.decode(bitstring)
-            if decode2 == 'invalid':
-                # print(bitstring)
-                sum_discard += count
-                continue
-            decode_bitstring = decode1 + decode2
+            decode_bitstring = decode1
             for i, p in enumerate(pauli[::-1]):
                 if p == 'I':
                     continue
