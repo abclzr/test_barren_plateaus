@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from qiskit import QuantumCircuit, ClassicalRegister
 from qiskit.quantum_info import Pauli, Statevector, SparsePauliOp
-from qiskit.circuit import Parameter
+from qiskit.circuit import Parameter, Gate
 from qiskit_nature.second_q.circuit.library import UCCSD, HartreeFock
 from qiskit import transpile
 from qiskit_aer import AerSimulator
@@ -14,6 +14,16 @@ from qiskit_aer.noise import (NoiseModel, QuantumError, ReadoutError,
     pauli_error, depolarizing_error, thermal_relaxation_error)
 
 from classical_register_allocator import ClassicalRegisterAllocator
+
+class IdealCX(Gate):
+    def __init__(self):
+        super().__init__('ideal_cx', 2, [])
+
+    def _define(self):
+        qc = QuantumCircuit(2, name='ideal_cx')
+        qc.cx(0, 1)
+        self.definition = qc
+ideal_cx = IdealCX()
 
 class _4_2_2_Code_Builder:
     def __init__(self, base_circuit: QuantumCircuit, t, b, q1, q2, a1, a2, clbit_allocator: ClassicalRegisterAllocator):
@@ -72,15 +82,15 @@ class _4_2_2_Code_Builder:
         self.base_circuit.reset(self.a2)
         
         self.base_circuit.h(self.a2)
-        self.base_circuit.cx(self.a2, self.t)
-        self.base_circuit.cx(self.t, self.a1)
-        self.base_circuit.cx(self.q1, self.a1)
-        self.base_circuit.cx(self.a2, self.q1)
+        self.base_circuit.append(ideal_cx, [self.a2, self.t])
+        self.base_circuit.append(ideal_cx, [self.t, self.a1])
+        self.base_circuit.append(ideal_cx, [self.q1, self.a1])
+        self.base_circuit.append(ideal_cx, [self.a2, self.q1])
         
-        self.base_circuit.cx(self.a2, self.q2)
-        self.base_circuit.cx(self.q2, self.a1)
-        self.base_circuit.cx(self.b, self.a1)
-        self.base_circuit.cx(self.a2, self.b)
+        self.base_circuit.append(ideal_cx, [self.a2, self.q2])
+        self.base_circuit.append(ideal_cx, [self.q2, self.a1])
+        self.base_circuit.append(ideal_cx, [self.b, self.a1])
+        self.base_circuit.append(ideal_cx, [self.a2, self.b])
         
         self.base_circuit.h(self.a2)
         self.base_circuit.measure(self.a1, syndrome_bit_index1)
