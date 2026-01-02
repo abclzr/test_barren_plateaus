@@ -31,7 +31,7 @@ noise_model = NoiseModel()
 # noise_model.add_all_qubit_quantum_error(depolarizing_error(0.003 * noise_level, 2), ['rzz', 'rxx', 'ryy', 'cx'])
 # noise_model.add_all_qubit_readout_error(ReadoutError([[1 - 0.003 * noise_level, 0.003 * noise_level], [0.003 * noise_level, 1 - 0.003 * noise_level]]))
 
-def main(syndrome_position):
+def main(syndrome_frequency, syndrome_noise):
     backend = AerSimulator(noise_model=noise_model, shots=10000)
     mole_name = 'H2'
     mapper_name = 'jordan_wigner'
@@ -91,8 +91,8 @@ def main(syndrome_position):
 
     circ = QuantumCircuit(8, 30)
     clbit_allocator = ClassicalRegisterAllocator(30)
-    dmc = tc.DMCircuit(8)
-    code_builder = Iceberg_Code_Builder(circ, 0, 5, [1, 2, 3, 4], 6, 7, clbit_allocator, dmc)
+    code_builder = Iceberg_Code_Builder(circ, 0, 5, [1, 2, 3, 4], 6, 7, clbit_allocator, syndrome_frequency)
+    code_builder.syndrome_noise = syndrome_noise
     code_builder.initialize()
     code_builder.logical_X(0)
     code_builder.logical_X(2)
@@ -137,8 +137,8 @@ def main(syndrome_position):
         for j in range(4):
             if pauli.z[j] and pauli.x[j] and not posterior_same[i][j]:
                 code_builder.logical_RX(np.pi / 2, j)
-        if i in syndrome_position:
-            code_builder.syndrome_measurement()
+        # if i in syndrome_position:
+        #     code_builder.syndrome_measurement()
 
     for i in range(4):
         code_builder.logical_RZ(-np.pi/2, i)
@@ -147,12 +147,12 @@ def main(syndrome_position):
     circ = transpile(circ, optimization_level=3, basis_gates=['rzz', 'h', 'rz', 'x', 'cx', 'swap', 'rxx'])
     print(circ)
     final_expval = 0
+    final_expval_dm = 0
     for pauli, coeff in zip(paulis, coeffs):
         circuit_with_measure_basis = QuantumCircuit(circ.num_qubits, circ.num_clbits)
         circuit_with_measure_basis = circuit_with_measure_basis.compose(circ)
         clbit_allocator_with_measure_basis = clbit_allocator.copy()
-        dmc_with_measure_basis = tc.DMCircuit(dmc._nqubits, dminputs=dmc.state())
-        code_builder_with_measure_basis = code_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis, new_dmc=dmc_with_measure_basis)
+        code_builder_with_measure_basis = code_builder.copy_for_a_new_circuit(circuit_with_measure_basis, clbit_allocator_with_measure_basis)
         map_codeblock_and_qubit = {
             0:(code_builder_with_measure_basis, 0),
             1:(code_builder_with_measure_basis, 1),
@@ -172,6 +172,9 @@ def main(syndrome_position):
         cbits = code_builder_with_measure_basis.measurement()
         exp_val = code_builder_with_measure_basis.dmc.expectation_ps(z=[code_builder.qubit_list[i] for i, p in enumerate(pauli[::-1]) if p != 'I'])
         print(exp_val)
+        print("Post-selection rate:", code_builder_with_measure_basis.all_post_selection_rate)
+        print("Post-selection rate list:", code_builder_with_measure_basis.post_selection_rate_list)
+        final_expval_dm += coeff * exp_val
         def analyze_counts(counts, pauli):
             expval = 0
             sum_total = 0
@@ -203,21 +206,18 @@ def main(syndrome_position):
         final_expval += expval * coeff
         print(f"Pauli: {pauli}, Coeff: {coeff}, Expval: {expval} Shots kept: {sum_keep}, Shots discarded: {sum_discard}")
 
-    print(f"Final expval: {final_expval}")
-    return final_expval
+    # print(f"Final expval: {final_expval}")
+    print(f"Final expval (density matrix): {final_expval_dm}")
+    return final_expval_dm
 
 if __name__ == "__main__":
     number_trials = 1
     results = {}
-    for syndrome_position in [[]]:#, [3], [2, 6], [1, 3, 5]]:
-        n_syndromes = len(syndrome_position)
-        results[n_syndromes] = []
-        for _ in range(number_trials):
-            print(f"Syndrome positions: {syndrome_position}")
-            result = main(syndrome_position)
-            results[n_syndromes].append(result)
-        print(f"Results for {n_syndromes} syndromes: {results[n_syndromes]}")
-        print(f"Average: {np.mean(results[n_syndromes])}, Stddev: {np.std(results[n_syndromes])}")
+    for syndrome_frequency in [1, 2, 3, 4, 5, 6]:#, [3], [2, 6], [1, 3, 5]]:
+        result_noise = main(syndrome_frequency, syndrome_noise=True)
+        result_noisefree = main(syndrome_frequency, syndrome_noise=False)
+        results[syndrome_frequency] = (result_noise, result_noisefree)
+        print(f"Results for {syndrome_frequency} syndromes: {results[syndrome_frequency]}")
         pickle_filename = f"evaluate_H2_iceberg_code_results.pickle"
         with open(pickle_filename, "wb") as f:
             pickle.dump(results, f)
