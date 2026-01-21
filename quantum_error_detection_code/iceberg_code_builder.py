@@ -49,7 +49,7 @@ class Iceberg_Code_Builder:
         if dmc is not None:
             self.dmc = dmc
         else:
-            self.dmc = tc.DMCircuit(self.base_circuit.num_qubits)
+            self.dmc = None
         self.syndrome_bits = []
         self.all_post_selection_rate = 1.0
     
@@ -342,7 +342,10 @@ class Iceberg_Code_Builder:
             return ''.join(['1' if bit == '0' else '0' for bit in measured_bitstring[1:-1]])
     
     def copy_for_a_new_circuit(self, new_base_circuit: QuantumCircuit, new_clbit_allocator: ClassicalRegisterAllocator):
-        new_builder = Iceberg_Code_Builder(new_base_circuit, self.t, self.b, self.qubit_list, self.a1, self.a2, new_clbit_allocator, self.syndrome_frequency, tc.DMCircuit(self.dmc._nqubits, dminputs=self.dmc.state()))
+        if self.dmc is not None:
+            new_builder = Iceberg_Code_Builder(new_base_circuit, self.t, self.b, self.qubit_list, self.a1, self.a2, new_clbit_allocator, self.syndrome_frequency, tc.DMCircuit(self.dmc._nqubits, dminputs=self.dmc.state()))
+        else:
+            new_builder = Iceberg_Code_Builder(new_base_circuit, self.t, self.b, self.qubit_list, self.a1, self.a2, new_clbit_allocator, self.syndrome_frequency, dmc=None)
         new_builder.syndrome_bits = self.syndrome_bits.copy()
         new_builder.cnt = self.cnt
         new_builder.syndrome_noise = self.syndrome_noise
